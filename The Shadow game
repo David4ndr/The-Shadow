@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="pt-pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Shadow</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Courier New', Courier, monospace;
+            color: white;
+            user-select: none;
+            touch-action: none;
+        }
+
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            cursor: default;
+        }
+
+        /* Menu Principal e Pausa */
+        #main-menu, #pause-menu, #tutorial-overlay {
+            position: fixed;
+            inset: 0;
+            background-color: rgba(5, 5, 5, 0.95);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 300;
+        }
+
+        #pause-menu, #tutorial-overlay {
+            background-color: rgba(0, 0, 0, 0.85);
+            display: none;
+            backdrop-filter: blur(4px);
+        }
+
+        .title-glow {
+            text-shadow: 0 0 20px rgba(255, 0, 0, 0.8), 0 0 40px rgba(255, 0, 0, 0.4);
+            animation: pulse-title 3s infinite alternate;
+        }
+
+        @keyframes pulse-title {
+            0% { text-shadow: 0 0 10px rgba(255, 0, 0, 0.5); }
+            100% { text-shadow: 0 0 30px rgba(255, 0, 0, 1), 0 0 50px rgba(255, 0, 0, 0.6); }
+        }
+
+        /* Lanterna */
+        #flashlight {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(
+                circle 180px at var(--x) var(--y),
+                rgba(255, 255, 240, 0.25) 0%,
+                rgba(255, 255, 230, 0.08) 40%,
+                rgba(0, 0, 0, 1) 85%
+            );
+            pointer-events: none;
+            z-index: 10;
+            opacity: 0;
+            transition: opacity 1s;
+        }
+
+        #room-light {
+            position: absolute;
+            inset: 0;
+            background: rgba(255, 255, 230, 0.15);
+            z-index: 1;
+            transition: opacity 1s;
+            display: none;
+        }
+
+        #flashlight.active { opacity: 1; }
+        #flashlight.disabled { opacity: 0 !important; }
+
+        #flashlight-center {
+            position: absolute;
+            width: 80px;
+            height: 80px;
+            border: 1px dashed rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            left: var(--x);
+            top: var(--y);
+            pointer-events: none;
+            z-index: 11;
+            display: none;
+            background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
+        }
+
+        /* Portas */
+        #spawn-door, #doll-door {
+            position: absolute;
+            width: 60px;
+            height: 90px;
+            background: #050505;
+            border: 2px solid #222;
+            border-bottom: none;
+            z-index: 4;
+            transition: border-color 0.3s, box-shadow 0.3s, background 0.3s;
+        }
+
+        #spawn-door { left: 50%; top: 20px; transform: translateX(-50%); }
+        #doll-door { left: 20px; bottom: 0; display: none; }
+        
+        .door-lit {
+            border-color: #444 !important;
+            background: #151515 !important;
+            box-shadow: 0 0 25px rgba(255, 255, 255, 0.1);
+        }
+
+        /* Cadeira */
+        #chair {
+            position: absolute;
+            width: 70px;
+            height: 90px;
+            left: 50%;
+            bottom: 150px;
+            transform: translateX(-50%);
+            z-index: 12;
+            cursor: grab;
+            filter: brightness(1.2);
+            transition: opacity 0.3s, filter 0.3s;
+        }
+
+        #chair:active { cursor: grabbing; }
+        #chair.lit { opacity: 0.9; filter: brightness(1.5) drop-shadow(0 0 10px rgba(255,255,255,0.2)); }
+
+        #health-container {
+            position: absolute;
+            width: 120px;
+            left: 50%;
+            bottom: 25px;
+            transform: translateX(-50%);
+            text-align: center;
+            z-index: 20;
+            display: none;
+        }
+
+        #health-fill {
+            width: 100%;
+            height: 100%;
+            background: #0f0;
+            transition: width 0.3s, background 0.5s;
+        }
+
+        /* Memórias */
+        .collectible {
+            position: absolute;
+            width: 24px;
+            height: 24px;
+            background: #fff;
+            box-shadow: 0 0 15px #fff;
+            border-radius: 50%;
+            z-index: 5;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        }
+
+        .progress-ring {
+            position: absolute;
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            pointer-events: none;
+            opacity: 0.6;
+        }
+
+        /* Entidades */
+        #monster, #doll {
+            position: absolute;
+            display: none;
+            z-index: 15;
+            pointer-events: none;
+            filter: blur(1px);
+        }
+
+        .entity-body { fill: #000; filter: drop-shadow(0 0 10px #000); }
+        .monster-eye { fill: #ff0000; animation: blink 2s infinite; filter: drop-shadow(0 0 15px #f00); }
+        .doll-eye { fill: #00ffff; filter: drop-shadow(0 0 10px #0ff); }
+
+        @keyframes blink { 0%, 90%, 100% { transform: scaleY(1); opacity: 1; } 95% { transform: scaleY(0.1); opacity: 0.5; } }
+
+        .cooldown-indicator {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 120px;
+            height: 120px;
+            transform: translate(-50%, -50%);
+            border-radius: 50%;
+            pointer-events: none;
+        }
+
+        /* UI de Setup */
+        #setup-ui {
+            position: fixed;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 100;
+            text-align: center;
+            display: none;
+        }
+
+        /* Jumpscare */
+        #jumpscare-overlay {
+            position: fixed;
+            inset: 0;
+            background: #000;
+            display: none;
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .btn {
+            background: transparent;
+            color: #fff;
+            border: 2px solid #fff;
+            padding: 12px 40px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-bottom: 10px;
+        }
+
+        .btn:hover { background: #fff; color: #000; box-shadow: 0 0 15px rgba(255,255,255,0.5); }
+        
+        #esc-hint {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            font-size: 10px;
+            color: #444;
+            text-transform: uppercase;
+            z-index: 50;
+        }
+
+        /* Tutorial Highlights */
+        .tutorial-step {
+            max-width: 400px;
+            text-align: center;
+            animation: fadeIn 0.5s ease-out;
+        }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body>
+
+    <!-- Menu Principal -->
+    <div id="main-menu">
+        <h1 class="text-6xl text-red-700 font-bold tracking-[0.5em] mb-12 uppercase title-glow">The Shadow</h1>
+        <div class="text-gray-400 text-sm mb-12 text-center max-w-md leading-relaxed">
+            <p class="mb-2">Uma experiência de terror minimalista.</p>
+            <p class="mb-2">Protege a tua sanidade.</p>
+        </div>
+        <button class="btn text-xl" onclick="startTutorial()">NOVO JOGO</button>
+        <button class="btn text-lg border-zinc-700 text-zinc-500" onclick="enterSetup()">SALTAR TUTORIAL</button>
+    </div>
+
+    <!-- Overlay de Tutorial -->
+    <div id="tutorial-overlay">
+        <div id="tutorial-content" class="tutorial-step">
+            <h3 id="tut-title" class="text-2xl font-bold text-white mb-4 uppercase tracking-widest"></h3>
+            <p id="tut-text" class="text-zinc-400 mb-8"></p>
+            <button class="btn" onclick="nextTutorialStep()">ENTENDI</button>
+        </div>
+    </div>
+
+    <!-- Menu de Pausa -->
+    <div id="pause-menu">
+        <h2 class="text-4xl text-white font-bold tracking-[0.2em] mb-10 uppercase">Jogo Pausado</h2>
+        <button class="btn text-lg" onclick="togglePause()">CONTINUAR</button>
+        <button class="btn text-lg border-red-900 hover:bg-red-900" onclick="location.reload()">REINICIAR</button>
+    </div>
+
+    <div id="esc-hint">ESC para pausar</div>
+
+    <!-- Interface do Jogo -->
+    <div id="game-container">
+        <div id="room-light"></div>
+        <div id="flashlight"></div>
+        <div id="flashlight-center"></div>
+        
+        <div id="ui-layer" class="absolute top-8 left-8 z-20 pointer-events-none opacity-0 transition-opacity duration-1000">
+            <p id="level-display" class="text-red-600 text-sm font-bold uppercase tracking-widest mb-1">NÍVEL 1</p>
+            <p id="score" class="text-3xl font-bold font-mono">0 / 8</p>
+            <p id="timer" class="text-xs text-gray-500 mt-2 uppercase tracking-tighter">O ar esfria...</p>
+            <p id="battery-status" class="text-[10px] text-yellow-500 mt-1 uppercase hidden font-bold">LANTERNA DESCARREGADA!</p>
+        </div>
+
+        <div id="spawn-door"></div>
+        <div id="doll-door"></div>
+
+        <div id="chair" onmousedown="startDragging(event)" ontouchstart="startDragging(event)">
+            <svg viewBox="0 0 60 80" fill="none">
+                <path d="M15 45H45M15 45L10 75M45 45L50 75M15 15V45M45 15V45M10 15H50" stroke="#fff" stroke-width="3"/>
+                <rect x="15" y="40" width="30" height="6" fill="#fff" fill-opacity="0.6"/>
+            </svg>
+        </div>
+        
+        <div id="health-container">
+            <div class="w-full h-1.5 bg-zinc-900 border border-zinc-700 mb-1">
+                <div id="health-fill"></div>
+            </div>
+            <div id="health-text" class="text-[10px] text-zinc-500 uppercase">INTEGRIDADE: 100%</div>
+        </div>
+
+        <div id="monster">
+            <div class="cooldown-indicator" id="monster-ring"></div>
+            <svg viewBox="0 0 100 200" width="100" height="200">
+                <path class="entity-body" d="M50 20 Q20 50 15 100 Q10 180 50 190 Q90 180 85 100 Q80 50 50 20Z" />
+                <path class="entity-body" d="M20 70 Q-10 120 10 170" fill="none" stroke="#000" stroke-width="8" />
+                <path class="entity-body" d="M80 70 Q110 120 90 170" fill="none" stroke="#000" stroke-width="8" />
+                <circle cx="40" cy="60" r="4" class="monster-eye" />
+                <circle cx="60" cy="60" r="4" class="monster-eye" />
+            </svg>
+        </div>
+
+        <div id="doll">
+            <div class="cooldown-indicator" id="doll-ring"></div>
+            <svg viewBox="0 0 60 120" width="60" height="120">
+                <circle cx="30" cy="30" r="20" class="entity-body" />
+                <path d="M30 50 L15 110 L45 110 Z" class="entity-body" />
+                <circle cx="23" cy="25" r="3" class="doll-eye" />
+                <circle cx="37" cy="25" r="3" class="doll-eye" />
+            </svg>
+        </div>
+
+        <div id="setup-ui">
+            <p class="text-sm text-zinc-400 mb-4 uppercase tracking-widest font-bold">Posiciona a cadeira onde desejares defender</p>
+            <button class="btn bg-white !text-black" onclick="finishSetup()">ESTOU PRONTO</button>
+        </div>
+    </div>
+
+    <!-- Mensagens Flutuantes -->
+    <div id="game-msg" class="fixed top-1/4 left-1/2 -translate-x-1/2 text-center z-50 pointer-events-none opacity-0 transition-opacity duration-500">
+        <h2 id="msg-title" class="text-2xl font-bold text-red-600 tracking-widest uppercase"></h2>
+        <p id="msg-body" class="text-white text-sm"></p>
+    </div>
+
+    <!-- Jumpscare -->
+    <div id="jumpscare-overlay">
+        <div id="scary-face">
+            <svg viewBox="0 0 500 500" style="width: 90vw; height: 90vh;">
+                <rect width="500" height="500" fill="black"/>
+                <circle cx="150" cy="180" r="100" fill="#300"/>
+                <circle cx="350" cy="180" r="100" fill="#300"/>
+                <circle cx="150" cy="180" r="20" fill="red">
+                    <animate attributeName="r" values="20;35;20" dur="0.1s" repeatCount="indefinite" />
+                </circle>
+                <circle cx="350" cy="180" r="20" fill="red">
+                    <animate attributeName="r" values="20;35;20" dur="0.1s" repeatCount="indefinite" />
+                </circle>
+                <path d="M50 400 Q250 650 450 400" stroke="white" stroke-width="40" fill="none"/>
+                <path d="M120 420 L140 480 L160 420 Z" fill="#ddd"/>
+                <path d="M240 435 L250 510 L260 435 Z" fill="#ddd"/>
+                <path d="M340 420 L360 480 L380 420 Z" fill="#ddd"/>
+            </svg>
+        </div>
+    </div>
+
+    <script>
+        const config = {
+            initialWait: 15,
+            waitIncrease: 5,
+            initialGoal: 8,
+            goalIncreaseMultiplier: 1.25,
+            collectTime: 1200,
+            monsterDamage: 0.15,
+            banishTime: 1800,
+            dollBanishTime: 1500,
+            flashlightDisableTime: 8000,
+            monsterSpeedBase: 0.7,
+            monsterSpeedInc: 0.05,
+            dollSpeed: 2.2
+        };
+
+        let state = {
+            inMenu: true,
+            setupMode: false,
+            paused: false,
+            isDragging: false,
+            level: 1,
+            score: 0,
+            goal: config.initialGoal,
+            active: false,
+            monsterActive: false,
+            monsterPos: { x: 0, y: 0 },
+            monsterBanishProgress: 0,
+            dollActive: false,
+            dollPos: { x: 0, y: 0 },
+            dollBanishProgress: 0,
+            mouse: { x: window.innerWidth/2, y: window.innerHeight/2 },
+            health: 100,
+            waitTime: config.initialWait,
+            timeLeft: config.initialWait,
+            lastCrackTime: 0,
+            flashlightEnabled: true,
+            tutorialStep: 0
+        };
+
+        const els = {
+            container: document.getElementById('game-container'),
+            menu: document.getElementById('main-menu'),
+            pauseMenu: document.getElementById('pause-menu'),
+            tutOverlay: document.getElementById('tutorial-overlay'),
+            tutTitle: document.getElementById('tut-title'),
+            tutText: document.getElementById('tut-text'),
+            chair: document.getElementById('chair'),
+            setupUI: document.getElementById('setup-ui'),
+            roomLight: document.getElementById('room-light'),
+            flashlight: document.getElementById('flashlight'),
+            flCenter: document.getElementById('flashlight-center'),
+            ui: document.getElementById('ui-layer'),
+            healthContainer: document.getElementById('health-container'),
+            healthFill: document.getElementById('health-fill'),
+            healthText: document.getElementById('health-text'),
+            monster: document.getElementById('monster'),
+            monsterRing: document.getElementById('monster-ring'),
+            doll: document.getElementById('doll'),
+            dollRing: document.getElementById('doll-ring'),
+            door: document.getElementById('spawn-door'),
+            dollDoor: document.getElementById('doll-door'),
+            score: document.getElementById('score'),
+            level: document.getElementById('level-display'),
+            timer: document.getElementById('timer'),
+            overlay: document.getElementById('jumpscare-overlay'),
+            batteryStatus: document.getElementById('battery-status'),
+            msg: document.getElementById('game-msg'),
+            msgTitle: document.getElementById('msg-title'),
+            msgBody: document.getElementById('msg-body'),
+            scaryFace: document.getElementById('scary-face')
+        };
+
+        const memoryStates = new Map();
+        let audioCtx, masterGain, timerInterval, lastTime = Date.now();
+
+        // --- TUTORIAL ---
+        const tutorialSteps = [
+            { title: "A Cadeira", text: "Esta é a tua âncora. Arrasta-a para uma posição estratégica. Se a Sombra a tocar, a tua integridade diminuirá." },
+            { title: "A Lanterna", text: "A luz é a tua única arma. Aponta-a para as entidades para as expulsar. Mas cuidado... algumas coisas preferem o escuro." },
+            { title: "Memórias", text: "Recolhe os pontos brancos de luz (memórias) mantendo o foco da lanterna neles. Completa a meta para avançar de nível." },
+            { title: "A Sombra", text: "Ela virá da porta principal. Expulsa-a antes que ela chegue à cadeira. O ar ficará frio quando ela estiver perto." }
+        ];
+
+        function startTutorial() {
+            state.tutorialStep = 0;
+            els.menu.style.display = 'none';
+            els.tutOverlay.style.display = 'flex';
+            updateTutorialUI();
+            initAudio();
+        }
+
+        function updateTutorialUI() {
+            const step = tutorialSteps[state.tutorialStep];
+            els.tutTitle.innerText = step.title;
+            els.tutText.innerText = step.text;
+        }
+
+        function nextTutorialStep() {
+            state.tutorialStep++;
+            if (state.tutorialStep >= tutorialSteps.length) {
+                els.tutOverlay.style.display = 'none';
+                enterSetup();
+            } else {
+                updateTutorialUI();
+            }
+            playUIFeedback(400, 0.1);
+        }
+
+        // --- AUDIO ---
+        async function initAudio() {
+            if (audioCtx) return;
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            masterGain = audioCtx.createGain();
+            masterGain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            masterGain.connect(audioCtx.destination);
+            startWindSystem();
+            startDrone();
+        }
+
+        function startWindSystem() {
+            const bufferSize = 2 * audioCtx.sampleRate;
+            const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+            const output = noiseBuffer.getChannelData(0);
+            let lastOut = 0.0;
+            for (let i = 0; i < bufferSize; i++) {
+                let white = Math.random() * 2 - 1;
+                output[i] = (lastOut + (0.02 * white)) / 1.02;
+                lastOut = output[i];
+                output[i] *= 3.5;
+            }
+            const windSource = audioCtx.createBufferSource();
+            windSource.buffer = noiseBuffer; windSource.loop = true;
+            const windGain = audioCtx.createGain();
+            windGain.gain.setValueAtTime(0.04, audioCtx.currentTime);
+            const filter = audioCtx.createBiquadFilter();
+            filter.type = 'lowpass'; filter.frequency.setValueAtTime(350, audioCtx.currentTime);
+            windSource.connect(filter).connect(windGain).connect(masterGain);
+            windSource.start();
+        }
+
+        function startDrone() {
+            const drone = audioCtx.createOscillator();
+            drone.type = 'sine'; drone.frequency.setValueAtTime(40, audioCtx.currentTime);
+            const dGain = audioCtx.createGain();
+            dGain.gain.setValueAtTime(0.02, audioCtx.currentTime);
+            drone.connect(dGain).connect(masterGain);
+            drone.start();
+        }
+
+        function playWoodCrack() {
+            if (!audioCtx || state.paused) return;
+            const now = audioCtx.currentTime;
+            if (now - state.lastCrackTime < 0.4) return;
+            state.lastCrackTime = now;
+            const osc = audioCtx.createOscillator();
+            const g = audioCtx.createGain();
+            osc.type = 'square';
+            osc.frequency.setValueAtTime(90 + Math.random() * 40, now);
+            osc.frequency.exponentialRampToValueAtTime(10, now + 0.12);
+            g.gain.setValueAtTime(0.12, now);
+            g.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+            osc.connect(g).connect(masterGain);
+            osc.start(); osc.stop(now + 0.25);
+        }
+
+        function playNightmareSound() {
+            if (!audioCtx) return;
+            const now = audioCtx.currentTime;
+            const duration = 4;
+            const noiseBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * duration, audioCtx.sampleRate);
+            const output = noiseBuffer.getChannelData(0);
+            for (let i = 0; i < output.length; i++) output[i] = Math.random() * 2 - 1;
+            const noiseSrc = audioCtx.createBufferSource();
+            noiseSrc.buffer = noiseBuffer;
+            const noiseFilter = audioCtx.createBiquadFilter();
+            noiseFilter.type = 'bandpass';
+            noiseFilter.frequency.setValueAtTime(1000, now);
+            noiseFilter.frequency.exponentialRampToValueAtTime(5000, now + 0.5);
+            const noiseGain = audioCtx.createGain();
+            noiseGain.gain.setValueAtTime(0.8, now);
+            noiseGain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+            noiseSrc.connect(noiseFilter).connect(noiseGain).connect(masterGain);
+            noiseSrc.start();
+            const sub = audioCtx.createOscillator();
+            const sGain = audioCtx.createGain();
+            sub.frequency.setValueAtTime(60, now);
+            sub.frequency.linearRampToValueAtTime(15, now + 1.5);
+            sGain.gain.setValueAtTime(1.5, now);
+            sGain.gain.linearRampToValueAtTime(0, now + 2);
+            sub.connect(sGain).connect(masterGain);
+            sub.start(); sub.stop(now + 2);
+        }
+
+        function playLaugh() {
+            if(!audioCtx || state.paused) return;
+            const now = audioCtx.currentTime;
+            for(let i=0; i<5; i++) {
+                const o = audioCtx.createOscillator();
+                o.frequency.setValueAtTime(400 + Math.random()*200, now + i*0.12);
+                o.frequency.exponentialRampToValueAtTime(100, now + i*0.12 + 0.2);
+                const g = audioCtx.createGain();
+                g.gain.setValueAtTime(0.1, now + i*0.12);
+                g.gain.linearRampToValueAtTime(0, now + i*0.12 + 0.2);
+                o.connect(g).connect(masterGain);
+                o.start(now + i*0.12); o.stop(now + i*0.12 + 0.2);
+            }
+        }
+
+        function playUIFeedback(freq, dur) {
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const g = audioCtx.createGain();
+            osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+            g.gain.setValueAtTime(0.06, audioCtx.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + dur);
+            osc.connect(g).connect(masterGain);
+            osc.start(); osc.stop(audioCtx.currentTime + dur);
+        }
+
+        // --- CORE LÓGICA ---
+        function togglePause() {
+            if (state.inMenu || state.setupMode || state.health <= 0) return;
+            state.paused = !state.paused;
+            els.pauseMenu.style.display = state.paused ? 'flex' : 'none';
+            if (masterGain) masterGain.gain.setTargetAtTime(state.paused ? 0.05 : 0.3, audioCtx.currentTime, 0.1);
+            if (!state.paused) lastTime = Date.now();
+            playUIFeedback(state.paused ? 120 : 220, 0.2);
+        }
+
+        async function enterSetup() {
+            await initAudio();
+            els.menu.style.display = 'none';
+            els.roomLight.style.display = 'block';
+            els.setupUI.style.display = 'block';
+            state.inMenu = false;
+            state.setupMode = true;
+        }
+
+        function finishSetup() {
+            state.setupMode = false;
+            state.active = true;
+            els.setupUI.style.display = 'none';
+            els.roomLight.style.opacity = '0';
+            els.flashlight.classList.add('active');
+            els.flCenter.style.display = 'block';
+            els.ui.style.opacity = '1';
+            els.healthContainer.style.display = 'block';
+            els.chair.style.filter = "brightness(0.3)";
+            setTimeout(() => els.roomLight.style.display = 'none', 1000);
+            spawnMemories();
+            startTimer();
+            lastTime = Date.now();
+            requestAnimationFrame(loop);
+        }
+
+        function spawnMemories() {
+            document.querySelectorAll('.collectible').forEach(c => c.remove());
+            memoryStates.clear();
+            for(let i=0; i<state.goal; i++) {
+                const c = document.createElement('div');
+                c.className = 'collectible';
+                c.dataset.id = i;
+                c.style.left = (Math.random() * 80 + 10) + '%';
+                c.style.top = (Math.random() * 60 + 20) + '%';
+                c.innerHTML = '<div class="progress-ring"></div>';
+                els.container.appendChild(c);
+                memoryStates.set(i.toString(), 0);
+            }
+        }
+
+        function startTimer() {
+            if(timerInterval) clearInterval(timerInterval);
+            state.timeLeft = state.waitTime;
+            timerInterval = setInterval(() => {
+                if(!state.active || state.monsterActive || state.paused) return;
+                state.timeLeft--;
+                els.timer.innerText = `Próximo evento em ${state.timeLeft}s`;
+                if(state.timeLeft <= 0) activateMonster();
+                if(state.level >= 3 && !state.dollActive && !state.monsterActive && Math.random() < 0.1) {
+                    activateDoll();
+                }
+            }, 1000);
+        }
+
+        function activateMonster() {
+            state.monsterActive = true;
+            state.monsterBanishProgress = 0;
+            els.monster.style.display = 'block';
+            const door = els.door.getBoundingClientRect();
+            state.monsterPos = { x: door.left - 20, y: door.top };
+            els.timer.innerText = "A SOMBRA CHEGOU";
+            els.timer.style.color = "#f00";
+        }
+
+        function activateDoll() {
+            state.dollActive = true;
+            state.dollBanishProgress = 0;
+            els.doll.style.display = 'block';
+            els.dollDoor.style.display = 'block';
+            const dRect = els.dollDoor.getBoundingClientRect();
+            state.dollPos = { x: dRect.left, y: dRect.top };
+            showMessage("AVISO", "A BONECA ESTÁ SOLTA", "cyan-400");
+        }
+
+        function showMessage(title, body, color) {
+            els.msgTitle.innerText = title;
+            els.msgTitle.style.color = color;
+            els.msgBody.innerText = body;
+            els.msg.style.opacity = "1";
+            setTimeout(() => els.msg.style.opacity = "0", 3000);
+        }
+
+        function startDragging(e) {
+            if (!state.setupMode || state.paused) return;
+            state.isDragging = true;
+        }
+
+        window.addEventListener('mousemove', (e) => {
+            if(state.inMenu || state.paused) return;
+            state.mouse.x = e.clientX;
+            state.mouse.y = e.clientY;
+            
+            if (state.isDragging) {
+                els.chair.style.left = state.mouse.x + 'px';
+                els.chair.style.top = state.mouse.y + 'px';
+                els.chair.style.bottom = 'auto';
+                els.chair.style.transform = 'translate(-50%, -50%)';
+            }
+            
+            els.flashlight.style.setProperty('--x', state.mouse.x + 'px');
+            els.flashlight.style.setProperty('--y', state.mouse.y + 'px');
+            els.flCenter.style.setProperty('--x', state.mouse.x + 'px');
+            els.flCenter.style.setProperty('--y', state.mouse.y + 'px');
+        });
+
+        window.addEventListener('mouseup', () => state.isDragging = false);
+        window.addEventListener('keydown', (e) => e.key === 'Escape' && togglePause());
+
+        function loop() {
+            if(!state.active || state.paused) {
+                if(state.active) requestAnimationFrame(loop);
+                return;
+            }
+
+            const now = Date.now();
+            const dt = now - lastTime;
+            lastTime = now;
+
+            // Lógica da Sombra (Monster)
+            if(state.monsterActive) {
+                const chairRect = els.chair.getBoundingClientRect();
+                const cx = chairRect.left + 35;
+                const cy = chairRect.top + 45;
+                const dx = cx - (state.monsterPos.x + 50);
+                const dy = cy - (state.monsterPos.y + 100);
+                const distToChair = Math.sqrt(dx*dx + dy*dy);
+                
+                const ldx = state.mouse.x - (state.monsterPos.x + 50);
+                const ldy = state.mouse.y - (state.monsterPos.y + 100);
+                const isLit = state.flashlightEnabled && Math.sqrt(ldx*ldx + ldy*ldy) < 85;
+
+                if(isLit) {
+                    state.monsterBanishProgress += dt;
+                    const deg = (state.monsterBanishProgress / config.banishTime) * 360;
+                    els.monsterRing.style.background = `conic-gradient(rgba(255,0,0,0.6) ${deg}deg, transparent 0deg)`;
+                    if(state.monsterBanishProgress >= config.banishTime) {
+                        state.monsterActive = false;
+                        els.monster.style.display = 'none';
+                        startTimer();
+                        playUIFeedback(200, 0.3);
+                    }
+                } else {
+                    state.monsterBanishProgress = Math.max(0, state.monsterBanishProgress - dt * 0.3);
+                    const speed = config.monsterSpeedBase + (state.level * config.monsterSpeedInc);
+                    state.monsterPos.x += (dx/distToChair) * speed;
+                    state.monsterPos.y += (dy/distToChair) * speed;
+                }
+                
+                els.monster.style.left = state.monsterPos.x + 'px';
+                els.monster.style.top = state.monsterPos.y + 'px';
+
+                if(distToChair < 50) {
+                    state.health -= config.monsterDamage;
+                    updateHealthUI();
+                    playWoodCrack();
+                    if(state.health <= 0) triggerJumpscare();
+                }
+            }
+
+            // Lógica da Boneca (Doll)
+            if(state.dollActive) {
+                const ldx = state.mouse.x - (state.dollPos.x + 30);
+                const ldy = state.mouse.y - (state.dollPos.y + 60);
+                const isLit = state.flashlightEnabled && Math.sqrt(ldx*ldx + ldy*ldy) < 80;
+
+                if(isLit) {
+                    // A boneca desativa a lanterna se for iluminada por muito tempo
+                    state.dollBanishProgress += dt;
+                    const deg = (state.dollBanishProgress / config.dollBanishTime) * 360;
+                    els.dollRing.style.background = `conic-gradient(rgba(0,255,255,0.6) ${deg}deg, transparent 0deg)`;
+                    if(state.dollBanishProgress >= config.dollBanishTime) {
+                        state.dollActive = false;
+                        els.doll.style.display = 'none';
+                        disableFlashlight();
+                    }
+                } else {
+                    // Persegue a lanterna/mouse
+                    const dmx = state.mouse.x - (state.dollPos.x + 30);
+                    const dmy = state.mouse.y - (state.dollPos.y + 60);
+                    const distToMouse = Math.sqrt(dmx*dmx + dmy*dmy);
+                    state.dollPos.x += (dmx/distToMouse) * config.dollSpeed;
+                    state.dollPos.y += (dmy/distToMouse) * config.dollSpeed;
+                    state.dollBanishProgress = Math.max(0, state.dollBanishProgress - dt * 0.2);
+                }
+                els.doll.style.left = state.dollPos.x + 'px';
+                els.doll.style.top = state.dollPos.y + 'px';
+            }
+
+            // Lógica das Memórias
+            document.querySelectorAll('.collectible').forEach(c => {
+                const rect = c.getBoundingClientRect();
+                const mx = rect.left + 12;
+                const my = rect.top + 12;
+                const dist = Math.sqrt(Math.pow(state.mouse.x - mx, 2) + Math.pow(state.mouse.y - my, 2));
+                
+                if(state.flashlightEnabled && dist < 70) {
+                    let p = memoryStates.get(c.dataset.id) + dt;
+                    memoryStates.set(c.dataset.id, p);
+                    const ring = c.querySelector('.progress-ring');
+                    const deg = (p / config.collectTime) * 360;
+                    ring.style.boxShadow = `inset 0 0 0 2px rgba(255,255,255,0.3)`;
+                    ring.style.background = `conic-gradient(white ${deg}deg, transparent 0deg)`;
+                    
+                    if(p >= config.collectTime) {
+                        c.remove();
+                        state.score++;
+                        playUIFeedback(600 + (state.score * 50), 0.1);
+                        updateScoreUI();
+                    }
+                }
+            });
+
+            requestAnimationFrame(loop);
+        }
+
+        function updateHealthUI() {
+            els.healthFill.style.width = state.health + '%';
+            els.healthText.innerText = `INTEGRIDADE: ${Math.max(0, Math.floor(state.health))}%`;
+            if(state.health < 30) els.healthFill.style.background = "#f00";
+        }
+
+        function updateScoreUI() {
+            els.score.innerText = `${state.score} / ${state.goal}`;
+            if(state.score >= state.goal) {
+                state.level++;
+                state.score = 0;
+                state.goal = Math.floor(state.goal * config.goalIncreaseMultiplier);
+                state.health = Math.min(100, state.health + 20);
+                updateHealthUI();
+                els.level.innerText = `NÍVEL ${state.level}`;
+                spawnMemories();
+                showMessage("NÍVEL CONCLUÍDO", "A escuridão adensa-se...", "green-500");
+            }
+        }
+
+        function disableFlashlight() {
+            playLaugh();
+            state.flashlightEnabled = false;
+            els.flashlight.classList.add('disabled');
+            els.flCenter.style.display = 'none';
+            els.batteryStatus.classList.remove('hidden');
+            setTimeout(() => {
+                state.flashlightEnabled = true;
+                els.flashlight.classList.remove('disabled');
+                els.flCenter.style.display = 'block';
+                els.batteryStatus.classList.add('hidden');
+            }, config.flashlightDisableTime);
+        }
+
+        function triggerJumpscare() {
+            state.active = false;
+            els.overlay.style.display = 'flex';
+            playNightmareSound();
+            let shake = setInterval(() => {
+                els.scaryFace.style.transform = `translate(${(Math.random()-0.5)*100}px, ${(Math.random()-0.5)*100}px) scale(${1.2 + Math.random()})`;
+            }, 30);
+            setTimeout(() => {
+                clearInterval(shake);
+                location.reload();
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
